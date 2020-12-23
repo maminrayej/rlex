@@ -55,6 +55,7 @@ pub enum Operand<'a> {
     Number(usize),
     Char(char),
     NameOrText(&'a str),
+    Eps,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -106,7 +107,7 @@ fn ctou(c: char) -> Option<usize> {
 }
 
 pub fn to_postfix(infix: &str) -> Vec<Element> {
-    use crate::regex::Operand::{Char, NameOrText, Number, Text};
+    use crate::regex::Operand::{Char, Eps, NameOrText, Number, Text};
     use Element::Operand;
 
     let mut stack = Vec::<StackElement>::new();
@@ -119,12 +120,7 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
         let c_char = chars[char_index];
 
         if let Some(operator) = Operator::of(c_char) {
-            println!("Found operator: {}", c_char);
-            println!("Stack: {:?}", stack);
-
             while let Some(top_operator) = top_operator_of(&stack) {
-                println!("Found top operator: {:?}", top_operator);
-
                 if operator.priority() <= top_operator.priority() {
                     postfix.push(stack.pop().unwrap().into())
                 } else {
@@ -142,8 +138,6 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
                     char_index += 1;
                 }
                 ')' => {
-                    println!("Found )");
-                    println!("Stack: {:?}", stack);
                     while let Some(element) = stack.pop() {
                         if !matches!(element, StackElement::LeftParen) {
                             postfix.push(element.into());
@@ -155,19 +149,15 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
                     char_index += 1;
                 }
                 '"' => {
-                    println!("Found qoute at: {}", char_index);
                     if let Some(index) = next_occur_of(&chars, char_index + 1, |c| *c == '"') {
-                        println!("Closing qoute will be at: {}", index);
                         postfix.push(Operand(Text(&infix[char_index + 1..index])));
 
                         char_index = index + 1;
-                        println!("Now char_index at: {}", char_index);
                     } else {
                         panic!("Could not find closing '\"'")
                     }
                 }
                 c if c.is_alphanumeric() || c == '_' => {
-                    println!("Found alphanumeric: {} at {}", c, char_index);
                     let index = next_occur_of(&chars, char_index + 1, |c| {
                         !c.is_alphanumeric() && *c != '_'
                     })
@@ -176,17 +166,22 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
                     if infix[char_index..index].len() == 1 {
                         if chars[char_index].is_numeric() {
                             postfix.push(Operand(Number(ctou(chars[char_index]).unwrap())))
-                        } else if chars[char_index].is_ascii_alphabetic() || chars[char_index] == '_' {
+                        } else if chars[char_index].is_ascii_alphabetic()
+                            || chars[char_index] == '_'
+                        {
                             postfix.push(Operand(Char(chars[char_index])))
                         } else {
                             panic!("Unsupported character: {}", chars[char_index]);
                         }
                     } else {
-                        postfix.push(Operand(NameOrText(&infix[char_index..index])));
+                        if &infix[char_index..index] == "eps" {
+                            postfix.push(Operand(Eps))
+                        } else {
+                            postfix.push(Operand(NameOrText(&infix[char_index..index])));
+                        }
                     }
 
                     char_index = index;
-                    println!("Now char_index at: {}", char_index);
                 }
                 ' ' | '\t' | '\n' => char_index += 1,
                 c => panic!("Unsupported character: {}", c),
@@ -373,6 +368,24 @@ mod tests {
                 Operator(Dash),
                 Operator(Plus),
                 Operator(Concat),
+            ]
+        )
+    }
+
+    #[test]
+    fn eps() {
+        let postfix = to_postfix(r#" a . (b | eps) . c "#);
+
+        assert_eq!(
+            postfix,
+            vec![
+                Operand(Char('a')),
+                Operand(Char('b')),
+                Operand(Eps),
+                Operator(Or),
+                Operator(Concat),
+                Operand(Char('c')),
+                Operator(Concat)
             ]
         )
     }
