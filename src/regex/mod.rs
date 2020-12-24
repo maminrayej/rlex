@@ -1,95 +1,9 @@
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Operator {
-    Dash,
-    Plus,
-    Star,
-    Or,
-    Concat,
-    Question,
-}
+mod repr;
 
-impl Operator {
-    pub fn num_of_args(&self) -> usize {
-        match self {
-            Operator::Or | Operator::Concat | Operator::Dash => 2,
-            Operator::Plus | Operator::Question | Operator::Star => 1,
-        }
-    }
+pub use repr::Element::{self, *};
 
-    fn of(value: char) -> Option<Operator> {
-        match value {
-            '-' => Some(Operator::Dash),
-            '+' => Some(Operator::Plus),
-            '*' => Some(Operator::Star),
-            '|' => Some(Operator::Or),
-            '.' => Some(Operator::Concat),
-            '?' => Some(Operator::Question),
-            _ => None,
-        }
-    }
-
-    pub fn priority(&self) -> usize {
-        match self {
-            Operator::Dash => 3,
-            Operator::Plus | Operator::Star | Operator::Question => 2,
-            Operator::Concat => 1,
-            Operator::Or => 0,
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Operator::Dash => "-",
-            Operator::Plus => "+",
-            Operator::Star => "*",
-            Operator::Or => "|",
-            Operator::Concat => ".",
-            Operator::Question => "?",
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Operand<'a> {
-    Text(&'a str),
-    Number(usize),
-    Char(char),
-    NameOrText(&'a str),
-    Eps,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum StackElement {
-    Operator(Operator),
-    LeftParen,
-    RightParen,
-}
-#[derive(Debug, PartialEq)]
-pub enum Element<'a> {
-    Operand(Operand<'a>),
-    Operator(Operator),
-}
-
-impl<'a> From<StackElement> for Element<'a> {
-    fn from(se: StackElement) -> Self {
-        match se {
-            StackElement::Operator(op) => Element::Operator(op),
-            _ => panic!("Can not build Element from non-operator variants of StackElement"),
-        }
-    }
-}
-
-impl StackElement {
-    fn inner_op(&self) -> Option<&Operator> {
-        match self {
-            StackElement::Operator(operator) => Some(operator),
-            StackElement::LeftParen | StackElement::RightParen => None,
-        }
-    }
-}
-
-fn top_operator_of(stack: &Vec<StackElement>) -> Option<Operator> {
-    stack.last().and_then(|e| e.inner_op().copied())
+fn top_operator_of(stack: &Vec<char>) -> Option<Element> {
+    stack.last().and_then(|c| Element::operator_of(*c))
 }
 
 fn next_occur_of<F>(text: &Vec<char>, start: usize, pat: F) -> Option<usize>
@@ -99,7 +13,7 @@ where
     text[start..]
         .iter()
         .position(|c| pat(c))
-        .and_then(|index| Some(index + start))
+        .map(|index| index + start)
 }
 
 fn ctou(c: char) -> Option<usize> {
@@ -107,40 +21,37 @@ fn ctou(c: char) -> Option<usize> {
 }
 
 pub fn to_postfix(infix: &str) -> Vec<Element> {
-    use crate::regex::Operand::{Char, Eps, NameOrText, Number, Text};
-    use Element::Operand;
-
-    let mut stack = Vec::<StackElement>::new();
-    let mut postfix = Vec::<Element>::new();
+    let mut stack = vec![];
+    let mut postfix = vec![];
 
     let mut char_index = 0;
     let chars: Vec<char> = infix.chars().collect();
 
     while char_index < infix.len() {
-        let c_char = chars[char_index];
+        let c = chars[char_index];
 
-        if let Some(operator) = Operator::of(c_char) {
+        if let Some(operator) = Element::operator_of(c) {
             while let Some(top_operator) = top_operator_of(&stack) {
                 if operator.priority() <= top_operator.priority() {
-                    postfix.push(stack.pop().unwrap().into())
+                    postfix.push(Element::operator_of(stack.pop().unwrap()).unwrap());
                 } else {
                     break;
                 }
             }
 
-            stack.push(StackElement::Operator(operator));
+            stack.push(c);
 
             char_index += 1;
         } else {
-            match c_char {
+            match c {
                 '(' => {
-                    stack.push(StackElement::LeftParen);
+                    stack.push('(');
                     char_index += 1;
                 }
                 ')' => {
-                    while let Some(element) = stack.pop() {
-                        if !matches!(element, StackElement::LeftParen) {
-                            postfix.push(element.into());
+                    while let Some(c) = stack.pop() {
+                        if c != '(' {
+                            postfix.push(Element::operator_of(c).unwrap());
                         } else {
                             break;
                         }
@@ -150,7 +61,7 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
                 }
                 '"' => {
                     if let Some(index) = next_occur_of(&chars, char_index + 1, |c| *c == '"') {
-                        postfix.push(Operand(Text(&infix[char_index + 1..index])));
+                        postfix.push(Text(&infix[char_index + 1..index]));
 
                         char_index = index + 1;
                     } else {
@@ -165,19 +76,17 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
 
                     if infix[char_index..index].len() == 1 {
                         if chars[char_index].is_numeric() {
-                            postfix.push(Operand(Number(ctou(chars[char_index]).unwrap())))
+                            postfix.push(Number(ctou(chars[char_index]).unwrap()))
                         } else if chars[char_index].is_ascii_alphabetic()
                             || chars[char_index] == '_'
                         {
-                            postfix.push(Operand(Char(chars[char_index])))
-                        } else {
-                            panic!("Unsupported character: {}", chars[char_index]);
+                            postfix.push(Char(chars[char_index]))
                         }
                     } else {
                         if &infix[char_index..index] == "eps" {
-                            postfix.push(Operand(Eps))
+                            postfix.push(Eps)
                         } else {
-                            postfix.push(Operand(NameOrText(&infix[char_index..index])));
+                            postfix.push(NameOrText(&infix[char_index..index]));
                         }
                     }
 
@@ -189,10 +98,8 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
         }
     }
 
-    while let Some(operator) = stack.pop() {
-        let op = operator.inner_op().copied().unwrap();
-
-        let op = Element::Operator(op);
+    while let Some(c) = stack.pop() {
+        let op = Element::operator_of(c).expect("Expected operator but found parenthesis");
 
         postfix.push(op);
     }
@@ -202,7 +109,7 @@ pub fn to_postfix(infix: &str) -> Vec<Element> {
 
 #[cfg(test)]
 mod tests {
-    use super::{to_postfix, Element::*, Operand::*, Operator::*};
+    use super::*;
 
     #[test]
     fn empty_string() {
@@ -215,28 +122,28 @@ mod tests {
     fn one_text() {
         let postfix = to_postfix(r#" "if" "#);
 
-        assert_eq!(postfix, vec![Operand(Text("if"))]);
+        assert_eq!(postfix, vec![Text("if")]);
     }
 
     #[test]
     fn one_char() {
         let postfix = to_postfix(r#" a "#);
 
-        assert_eq!(postfix, vec![Operand(Char('a'))]);
+        assert_eq!(postfix, vec![Char('a')]);
     }
 
     #[test]
     fn one_number() {
         let postfix = to_postfix(r#" 1 "#);
 
-        assert_eq!(postfix, vec![Operand(Number(1))]);
+        assert_eq!(postfix, vec![Number(1)]);
     }
 
     #[test]
     fn one_name_or_text() {
         let postfix = to_postfix(r#" if "#);
 
-        assert_eq!(postfix, vec![Operand(NameOrText("if"))]);
+        assert_eq!(postfix, vec![NameOrText("if")]);
     }
 
     #[test]
@@ -246,13 +153,13 @@ mod tests {
         assert_eq!(
             postfix,
             vec![
-                Operand(NameOrText("if")),
-                Operand(NameOrText("else")),
-                Operator(Or),
-                Operand(NameOrText("while")),
-                Operator(Or),
-                Operand(NameOrText("for")),
-                Operator(Or),
+                NameOrText("if"),
+                NameOrText("else"),
+                Or,
+                NameOrText("while"),
+                Or,
+                NameOrText("for"),
+                Or,
             ]
         )
     }
@@ -264,13 +171,13 @@ mod tests {
         assert_eq!(
             postfix,
             vec![
-                Operand(Text("r")),
-                Operand(Text("l")),
-                Operator(Concat),
-                Operand(Text("e")),
-                Operator(Concat),
-                Operand(Text("x")),
-                Operator(Concat),
+                Text("r"),
+                Text("l"),
+                Concat,
+                Text("e"),
+                Concat,
+                Text("x"),
+                Concat,
             ]
         )
     }
@@ -279,31 +186,28 @@ mod tests {
     fn star() {
         let postfix = to_postfix(r#" a* "#);
 
-        assert_eq!(postfix, vec![Operand(Char('a')), Operator(Star)]);
+        assert_eq!(postfix, vec![Char('a'), Star]);
     }
 
     #[test]
     fn question() {
         let postfix = to_postfix(r#" a? "#);
 
-        assert_eq!(postfix, vec![Operand(Char('a')), Operator(Question)])
+        assert_eq!(postfix, vec![Char('a'), Question])
     }
 
     #[test]
     fn plus() {
         let postfix = to_postfix(r#" a+ "#);
 
-        assert_eq!(postfix, vec![Operand(Char('a')), Operator(Plus)]);
+        assert_eq!(postfix, vec![Char('a'), Plus]);
     }
 
     #[test]
     fn dash() {
         let postfix = to_postfix(r#" a-z "#);
 
-        assert_eq!(
-            postfix,
-            vec![Operand(Char('a')), Operand(Char('z')), Operator(Dash)]
-        )
+        assert_eq!(postfix, vec![Char('a'), Char('z'), Dash])
     }
 
     #[test]
@@ -313,13 +217,13 @@ mod tests {
         assert_eq!(
             postfix,
             vec![
-                Operand(Char('a')),
-                Operand(Char('b')),
-                Operand(Char('c')),
-                Operator(Or),
-                Operator(Concat),
-                Operand(Char('d')),
-                Operator(Concat)
+                Char('a'),
+                Char('b'),
+                Char('c'),
+                Or,
+                Concat,
+                Char('d'),
+                Concat
             ]
         )
     }
@@ -331,21 +235,21 @@ mod tests {
         assert_eq!(
             postfix,
             vec![
-                Operand(Char('a')),
-                Operand(Char('z')),
-                Operator(Dash),
-                Operator(Plus),
-                Operand(Char('a')),
-                Operand(Char('z')),
-                Operator(Dash),
-                Operand(Number(0)),
-                Operand(Number(9)),
-                Operator(Dash),
-                Operator(Or),
-                Operand(Char('_')),
-                Operator(Or),
-                Operator(Star),
-                Operator(Concat)
+                Char('a'),
+                Char('z'),
+                Dash,
+                Plus,
+                Char('a'),
+                Char('z'),
+                Dash,
+                Number(0),
+                Number(9),
+                Dash,
+                Or,
+                Char('_'),
+                Or,
+                Star,
+                Concat
             ]
         )
     }
@@ -357,17 +261,17 @@ mod tests {
         assert_eq!(
             postfix,
             vec![
-                Operand(Number(0)),
-                Operand(Number(9)),
-                Operator(Dash),
-                Operator(Plus),
-                Operand(Text(".")),
-                Operator(Concat),
-                Operand(Number(0)),
-                Operand(Number(9)),
-                Operator(Dash),
-                Operator(Plus),
-                Operator(Concat),
+                Number(0),
+                Number(9),
+                Dash,
+                Plus,
+                Text("."),
+                Concat,
+                Number(0),
+                Number(9),
+                Dash,
+                Plus,
+                Concat,
             ]
         )
     }
@@ -378,15 +282,7 @@ mod tests {
 
         assert_eq!(
             postfix,
-            vec![
-                Operand(Char('a')),
-                Operand(Char('b')),
-                Operand(Eps),
-                Operator(Or),
-                Operator(Concat),
-                Operand(Char('c')),
-                Operator(Concat)
-            ]
+            vec![Char('a'), Char('b'), Eps, Or, Concat, Char('c'), Concat]
         )
     }
 }
