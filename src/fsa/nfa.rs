@@ -33,15 +33,12 @@ pub struct Nfa {
     finish_id: usize,
 
     delta: HashMap<(usize, Lable), usize>,
-
-    sub_nfa1: Option<Box<Nfa>>,
-    sub_nfa2: Option<Box<Nfa>>,
 }
 
 impl Nfa {
-    pub fn of_text(text: &str) -> Self {
-        let start_id = 0;
-        let finish_id = text.len() + 1;
+    pub fn of_text(text: &str, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + text.len() + 1;
         let mut delta = HashMap::new();
 
         let chars: Vec<char> = text.chars().collect();
@@ -54,14 +51,12 @@ impl Nfa {
             start_id,
             finish_id,
             delta,
-            sub_nfa1: None,
-            sub_nfa2: None,
         }
     }
 
-    pub fn of_digit(digit: usize) -> Self {
-        let start_id = 0;
-        let finish_id = 1;
+    pub fn of_digit(digit: usize, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
         let mut delta = HashMap::new();
 
         delta.insert((start_id, utoc(digit).into()), finish_id);
@@ -70,14 +65,12 @@ impl Nfa {
             start_id,
             finish_id,
             delta,
-            sub_nfa1: None,
-            sub_nfa2: None,
         }
     }
 
-    pub fn of_char(c: char) -> Self {
-        let start_id = 0;
-        let finish_id = 1;
+    pub fn of_char(c: char, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
         let mut delta = HashMap::new();
 
         delta.insert((start_id, c.into()), finish_id);
@@ -86,14 +79,12 @@ impl Nfa {
             start_id,
             finish_id,
             delta,
-            sub_nfa1: None,
-            sub_nfa2: None,
         }
     }
 
-    pub fn from_eps() -> Self {
-        let start_id = 0;
-        let finish_id = 1;
+    pub fn from_eps(offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
 
         let mut delta = HashMap::new();
 
@@ -103,14 +94,12 @@ impl Nfa {
             start_id,
             finish_id,
             delta,
-            sub_nfa1: None,
-            sub_nfa2: None,
         }
     }
 
-    pub fn from_cdash(c1: char, c2: char) -> Self {
-        let start_id = 0;
-        let finish_id = 1;
+    pub fn from_cdash(c1: char, c2: char, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
 
         let mut delta = HashMap::new();
 
@@ -122,16 +111,122 @@ impl Nfa {
             start_id,
             finish_id,
             delta,
-            sub_nfa1: None,
-            sub_nfa2: None,
         }
     }
 
-    pub fn from_ndash(n1: usize, n2: usize) -> Self {
+    pub fn from_ndash(n1: usize, n2: usize, offset: usize) -> Self {
         let c1 = utoc(n1);
         let c2 = utoc(n2);
 
-        Nfa::from_cdash(c1, c2)
+        Nfa::from_cdash(c1, c2, offset)
+    }
+
+    pub fn from_or(nfa1: Nfa, nfa2: Nfa, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
+
+        let nfa1_sid = nfa1.sid();
+        let nfa1_fid = nfa1.fid();
+        let mut delta = nfa1.get_delta();
+
+        let nfa2_sid = nfa2.sid();
+        let nfa2_fid = nfa2.fid();
+        let delta2 = nfa2.get_delta();
+
+        delta.extend(delta2);
+
+        delta.insert((start_id, Lable::Eps), nfa1_sid);
+        delta.insert((start_id, Lable::Eps), nfa2_sid);
+        delta.insert((nfa1_fid, Lable::Eps), finish_id);
+        delta.insert((nfa2_fid, Lable::Eps), finish_id);
+
+        Nfa {
+            start_id,
+            finish_id,
+            delta,
+        }
+    }
+
+    pub fn from_concat(nfa1: Nfa, nfa2: Nfa, _: usize) -> Self {
+        let start_id = nfa1.sid();
+        let finish_id = nfa2.fid();
+
+        let nfa1_fid = nfa1.fid();
+        let nfa2_sid = nfa2.sid();
+
+        let mut delta = nfa1.get_delta();
+        let delta2 = nfa2.get_delta();
+
+        delta.extend(delta2);
+
+        delta.insert((nfa1_fid, Lable::Eps), nfa2_sid);
+
+        Nfa {
+            start_id,
+            finish_id,
+            delta,
+        }
+    }
+
+    pub fn from_star(nfa: Nfa, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
+
+        let nfa_sid = nfa.sid();
+        let nfa_fid = nfa.fid();
+
+        let mut delta = nfa.get_delta();
+
+        delta.insert((nfa_fid, Lable::Eps), nfa_sid);
+        delta.insert((start_id, Lable::Eps), nfa_sid);
+        delta.insert((start_id, Lable::Eps), finish_id);
+        delta.insert((nfa_fid, Lable::Eps), finish_id);
+
+        Nfa {
+            start_id,
+            finish_id,
+            delta,
+        }
+    }
+
+    pub fn from_plus(nfa: Nfa, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
+
+        let nfa_sid = nfa.sid();
+        let nfa_fid = nfa.fid();
+
+        let mut delta = nfa.get_delta();
+
+        delta.insert((nfa_fid, Lable::Eps), nfa_sid);
+        delta.insert((start_id, Lable::Eps), nfa_sid);
+        delta.insert((nfa_fid, Lable::Eps), finish_id);
+
+        Nfa {
+            start_id,
+            finish_id,
+            delta,
+        }
+    }
+
+    pub fn from_question(nfa: Nfa, offset: usize) -> Self {
+        let start_id = offset;
+        let finish_id = offset + 1;
+
+        let nfa_sid = nfa.sid();
+        let nfa_fid = nfa.fid();
+
+        let mut delta = nfa.get_delta();
+
+        delta.insert((start_id, Lable::Eps), nfa_sid);
+        delta.insert((start_id, Lable::Eps), finish_id);
+        delta.insert((nfa_fid, Lable::Eps), finish_id);
+
+        Nfa {
+            start_id,
+            finish_id,
+            delta,
+        }
     }
 
     pub fn insert_transition(&mut self, src_id: usize, lable: Lable, dst_id: usize) {
@@ -144,5 +239,13 @@ impl Nfa {
 
     pub fn fid(&self) -> usize {
         self.finish_id
+    }
+
+    pub fn get_delta(self) -> HashMap<(usize, Lable), usize> {
+        self.delta
+    }
+
+    pub fn delta(&self, (state_id, lable): (usize, Lable)) -> Option<usize> {
+        self.delta.get(&(state_id, lable)).copied()
     }
 }
